@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"top/services"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type Request struct {
@@ -33,6 +35,11 @@ func HandleContract(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid Keycloak token", http.StatusUnauthorized)
 		return
 	}
+	claims, ok := parsedToken.Claims.(jwt.MapClaims)
+	if !ok {
+		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		return
+	}
 
 	// 2. Marshal contract (bytes that were signed)
 	contractBytes, err := json.Marshal(req.Contract)
@@ -57,10 +64,21 @@ func HandleContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. Load orchestrator private key
+	// 4. Authorize contract based on provider policy fetched from APD.
+	allowed, err := services.AuthorizeContractAgainstAPD(req.Contract, claims)
+	if err != nil {
+		http.Error(w, "Policy authorization failed", http.StatusInternalServerError)
+		return
+	}
+	if !allowed {
+		http.Error(w, "User not authorized by provider policy", http.StatusForbidden)
+		return
+	}
+
+	// 5. Load orchestrator private key
 	priv, _ := services.LoadPrivateKey(os.Getenv("ORCH_PRIVATE_KEY"))
 
-	// 5. Secure store
+	// 6. Secure store
 	storeKey := []byte(os.Getenv("STORE_KEY"))
 	storePath := os.Getenv("STORE_PATH")
 
@@ -70,10 +88,10 @@ func HandleContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 6. Sign contract with orchestrator key (over the same bytes)
+	// 7. Sign contract with orchestrator key (over the same bytes)
 	orchSig, _ := services.Sign(contractBytes, priv)
 
-	// 7. Deploy to enclave (TEE)
+	// 8. Deploy to enclave (TEE)
 	deployReq := services.DeployRequest{
 		Contract:     services.Contract(req.Contract),
 		Signature:    req.Signature,
