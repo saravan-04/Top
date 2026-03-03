@@ -8,7 +8,6 @@ import (
 	"math/big"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -116,7 +115,6 @@ func ValidateAccessToken(tokenStr string) (*jwt.Token, error) {
 	})
 }
 
-
 func RSAPublicKeyFromToken(t *jwt.Token) (*rsa.PublicKey, error) {
 	claims, ok := t.Claims.(jwt.MapClaims)
 	if !ok {
@@ -140,87 +138,4 @@ func RSAPublicKeyFromToken(t *jwt.Token) (*rsa.PublicKey, error) {
 	}
 
 	return jwkToRSAPublicKey(JWK{Kty: kty, N: n, E: e})
-}
-
-
-// --- TEE attestation JWT verification and access token release ---
-
-func VerifyAttestationToken(tokenStr string) (*jwt.Token, error) {
-	if tokenStr == "" {
-		return nil, fmt.Errorf("empty attestation token")
-	}
-	jwksURL := os.Getenv("TEE_ATTESTATION_JWKS_URL")
-	if jwksURL == "" {
-		return nil, fmt.Errorf("TEE_ATTESTATION_JWKS_URL not set")
-	}
-	resp, err := http.Get(jwksURL)
-	if err != nil {
-		return nil, fmt.Errorf("fetch attestation JWKS: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("attestation JWKS returned status %d", resp.StatusCode)
-	}
-	var jwks JWKS
-	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
-		return nil, fmt.Errorf("decode attestation JWKS: %w", err)
-	}
-	keysByKID := make(map[string]*rsa.PublicKey)
-	for _, jwk := range jwks.Keys {
-		if jwk.Kty != "RSA" || jwk.N == "" || jwk.E == "" {
-			continue
-		}
-		pub, err := jwkToRSAPublicKey(jwk)
-		if err != nil {
-			continue
-		}
-		kid := jwk.Kid
-		if kid == "" {
-			kid = "default"
-		}
-		keysByKID[kid] = pub
-	}
-	if len(keysByKID) == 0 {
-		return nil, fmt.Errorf("no RSA keys in attestation JWKS")
-	}
-	parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256"}))
-	return parser.Parse(tokenStr, func(t *jwt.Token) (any, error) {
-		kid, _ := t.Header["kid"].(string)
-		if kid == "" {
-			if pub, ok := keysByKID["default"]; ok {
-				return pub, nil
-			}
-			return nil, fmt.Errorf("attestation token header missing kid")
-		}
-		pub, ok := keysByKID[kid]
-		if !ok {
-			return nil, fmt.Errorf("kid %q not found in attestation JWKS", kid)
-		}
-		return pub, nil
-	})
-}
-
-// IssueAccessToken creates a short-lived access token (JWT) signed by the orchestrator,
-// for use after successful TEE attestation. Signing key is read from ORCH_PRIVATE_KEY.
-func IssueAccessToken(subject string, extraClaims map[string]any) (string, error) {
-	keyPath := os.Getenv("ORCH_PRIVATE_KEY")
-	if keyPath == "" {
-		return "", fmt.Errorf("ORCH_PRIVATE_KEY not set")
-	}
-	priv, err := LoadPrivateKey(keyPath)
-	if err != nil {
-		return "", fmt.Errorf("load orchestrator key: %w", err)
-	}
-	now := time.Now()
-	claims := jwt.MapClaims{
-		"sub": subject,
-		"iat": float64(now.Unix()),
-		"exp": float64(now.Add(1 * time.Hour).Unix()),
-		"iss": "top-orchestrator",
-	}
-	for k, v := range extraClaims {
-		claims[k] = v
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	return token.SignedString(priv)
 }
