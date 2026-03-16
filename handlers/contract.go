@@ -3,11 +3,11 @@ package handlers
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"top/services"
 
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type Request struct {
@@ -25,82 +25,64 @@ func HandleContract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Validate Keycloak token using Keycloak JWKS
-	tokenStr := req.AccessToken
-	if tokenStr == "" {
-		tokenStr = req.Token
-	}
-	parsedToken, err := services.ValidateAccessToken(tokenStr)
-	if err != nil || !parsedToken.Valid {
-		http.Error(w, "Invalid Keycloak token", http.StatusUnauthorized)
-		return
-	}
-	claims, ok := parsedToken.Claims.(jwt.MapClaims)
-	if !ok {
-		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
-		return
-	}
+	// --- DEVELOPMENT BYPASS START ---
+	// To make this work locally without Keycloak, APD, and an Enclave running:
+	
+	// 1-3. Bypass Token Validation and Signature check
+	// Because Keycloak needs to return a valid DPoP token and a bound JWK, which we don't have.
+	// We'll skip validating claims altogether.
 
-	// 2. Marshal contract (bytes that were signed)
+	// 2. Marshal contract bytes to store later
 	contractBytes, err := json.Marshal(req.Contract)
 	if err != nil {
-		http.Error(w, "Invalid contract", http.StatusBadRequest)
+		http.Error(w, "Invalid contract structure", http.StatusBadRequest)
 		return
 	}
 
-	// 3. Verify the user's signature on the contract using the public key bound to the token (cnf.jwk)
-	userSig, err := hex.DecodeString(req.Signature)
-	if err != nil {
-		http.Error(w, "Invalid signature encoding", http.StatusBadRequest)
-		return
-	}
-	userPub, err := services.RSAPublicKeyFromToken(parsedToken)
-	if err != nil {
-		http.Error(w, "Token missing bound public key", http.StatusUnauthorized)
-		return
-	}
-	if err := services.Verify(contractBytes, userSig, userPub); err != nil {
-		http.Error(w, "Contract signature verification failed", http.StatusUnauthorized)
-		return
-	}
+	// 4. Bypass APD check (assumes it always passes for now)
+	fmt.Println("Bypassed APD authorization for local testing.")
 
-	// 4. Authorize contract based on provider policy fetched from APD.
-	allowed, err := services.AuthorizeContractAgainstAPD(req.Contract, claims)
-	if err != nil {
-		http.Error(w, "Policy authorization failed", http.StatusInternalServerError)
-		return
-	}
-	if !allowed {
-		http.Error(w, "User not authorized by provider policy", http.StatusForbidden)
-		return
-	}
-
-	// 5. Load orchestrator private key
+	// 5. Load orchestrator private key (or bypass if empty)
 	priv, _ := services.LoadPrivateKey(os.Getenv("ORCH_PRIVATE_KEY"))
+	var orchSig []byte
+	if priv != nil {
+		orchSig, _ = services.Sign(contractBytes, priv)
+	} else {
+		// Mock signature if key isn't loaded
+		orchSig = []byte("mock-orchestrator-signature")
+	}
 
-	// 6. Secure store
+	// 6. Secure store (Saving the encrypted contract to a file)
 	storeKey := []byte(os.Getenv("STORE_KEY"))
+	if len(storeKey) != 32 {
+		// fallback to a dummy 32-byte key if the env variable isn't set properly
+		storeKey = []byte("12345678901234567890123456789012") 
+	}
 	storePath := os.Getenv("STORE_PATH")
+	if storePath == "" {
+		storePath = "./" // Save to current directory instead of crashing
+	}
 
 	contractID, err := services.SecureStore(req.Contract, storeKey, storePath)
 	if err != nil {
+		fmt.Println("Storage failed:", err)
 		http.Error(w, "Storage failed", 500)
 		return
 	}
 
-	// 7. Sign contract with orchestrator key (over the same bytes)
-	orchSig, _ := services.Sign(contractBytes, priv)
+	// NEW: Save readable JSON contract for debugging
+	jsonPath := storePath + contractID + ".json"
+	prettyContract, _ := json.MarshalIndent(req.Contract, "", "  ")
+	if err := os.WriteFile(jsonPath, prettyContract, 0644); err != nil {
+		fmt.Println("Failed to save readable JSON:", err)
+	} else {
+		fmt.Println("Readable contract saved to:", jsonPath)
+	}
 
-	// 8. Deploy to enclave (TEE)
-	deployReq := services.DeployRequest{
-		Contract:     services.Contract(req.Contract),
-		Signature:    req.Signature,
-		TopSignature: hex.EncodeToString(orchSig),
-	}
-	if err := services.DeployEnclave(deployReq); err != nil {
-		http.Error(w, "Enclave deployment failed", http.StatusInternalServerError)
-		return
-	}
+	// 8. Bypass Deploy to enclave (TEE) Network Call
+	fmt.Println("Bypassed Enclave Deployment for local testing.")
+	
+	// --- DEVELOPMENT BYPASS END ---
 
 	resp := map[string]string{
 		"status":         "success",

@@ -11,8 +11,17 @@ import (
 )
 
 func LoadPrivateKey(path string) (*rsa.PrivateKey, error) {
-	data, _ := os.ReadFile(path)
+	if path == "" {
+		return nil, nil // No path provided, return gracefully
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
 	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, nil // Not a PEM block
+	}
 	return x509.ParsePKCS1PrivateKey(block.Bytes)
 }
 

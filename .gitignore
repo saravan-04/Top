@@ -1,0 +1,8 @@
+# Binaries and build artifacts
+top
+top.exe
+*.exe
+*.bin
+
+# Contract data
+[0-9a-f][0-9a-f]*.json
