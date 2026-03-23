@@ -6,3 +6,6 @@ top.exe
 
 # Contract data
 [0-9a-f][0-9a-f]*.json
+
+.env
+# Local env

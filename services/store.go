@@ -48,3 +48,37 @@ func SecureStore(contract interface{}, key []byte, path string) (string, error) 
 
 	return contractID, nil
 }
+
+func SecureStoreWithID(contract interface{}, key []byte, path string, contractID string) (string, error) {
+	if contractID == "" {
+		return "", os.ErrInvalid
+	}
+
+	data, err := json.Marshal(contract)
+	if err != nil {
+		return "", err
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	io.ReadFull(rand.Reader, nonce)
+
+	ciphertext := gcm.Seal(nonce, nonce, data, nil)
+
+	file := path + contractID + ".bin"
+	err = os.WriteFile(file, ciphertext, 0600)
+	if err != nil {
+		return "", err
+	}
+
+	return contractID, nil
+}

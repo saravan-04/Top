@@ -19,6 +19,7 @@ func main() {
 	}
 
 	http.HandleFunc("/contract", handlers.HandleContract)
+	http.HandleFunc("/contracts/", handlers.HandleGetContract)
 
 	log.Println("TOP running on port", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
