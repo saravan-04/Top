@@ -329,7 +329,7 @@ func HandleContract(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Step 11: DeployEnclave called")
 	fmt.Println("")
 	fmt.Println("Step 12: TEE started")
-	fmt.Println("")
+	fmt.Println("--------------------------------------------------------------------------------")
 
 	// --- DEVELOPMENT BYPASS END ---
 
