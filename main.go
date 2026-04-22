@@ -18,7 +18,8 @@ func main() {
 		port = "8085"
 	}
 
-	http.HandleFunc("/contract", handlers.HandleContract)
+	http.HandleFunc("/workload", handlers.HandleWorkload)   // new: ConMan-merged endpoint
+	http.HandleFunc("/contract", handlers.HandleContract)   // legacy: accepts pre-built contract
 	http.HandleFunc("/contracts/", handlers.HandleGetContract)
 
 	log.Println("TOP running on port", port)
